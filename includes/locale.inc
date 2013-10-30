@@ -1,5 +1,5 @@
 <?php
-// $Id: locale.inc,v 1.105 2007/01/05 05:32:22 unconed Exp $
+// $Id: locale.inc,v 1.105.2.6 2010/03/04 00:16:02 drumm Exp $
 
 /**
  * @file
@@ -41,6 +41,9 @@ function _locale_admin_manage_screen() {
   $options = array();
   $form['name'] = array('#tree' => TRUE);
   foreach ($languages['name'] as $key => $lang) {
+    // Language code should contain no markup, but is emitted
+    // by radio and checkbox options.
+    $key = check_plain($key);
     $options[$key] = '';
     $status = db_fetch_object(db_query("SELECT isdefault, enabled FROM {locales_meta} WHERE locale = '%s'", $key));
     if ($status->enabled) {
@@ -95,6 +98,14 @@ function theme_locale_admin_manage_screen($form) {
   $output .= drupal_render($form);
 
   return $output;
+}
+
+function _locale_admin_manage_screen_validate($form_id, $form_values) {
+  foreach ($form_values['name'] as $key => $value) {
+    if (preg_match('/["<>\']/', $value)) {
+      form_set_error('name][' . $key, t('The characters &lt;, &gt;, " and \' are not allowed in the language name in English field.'));
+    }
+  }
 }
 
 /**
@@ -184,10 +195,20 @@ function locale_add_language_form_validate($form_id, $form_values) {
     form_set_error(t('The language %language (%code) already exists.', array('%language' => $form_values['langname'], '%code' => $form_values['langcode'])));
   }
 
+  // If we are adding a non-custom language, check for a valid langcode.
   if (!isset($form_values['langname'])) {
     $isocodes = _locale_get_iso639_list();
     if (!isset($isocodes[$form_values['langcode']])) {
       form_set_error('langcode', t('Invalid language code.'));
+    }
+  }
+  // Otherwise, check for invlaid characters
+  else {
+    if (preg_match('/["<>\']/', $form_values['langcode'])) {
+      form_set_error('langcode', t('The characters &lt;, &gt;, " and \' are not allowed in the language code field.'));
+    }
+    if (preg_match('/["<>\']/', $form_values['langname'])) {
+      form_set_error('langname', t('The characters &lt;, &gt;, " and \' are not allowed in the language name in English field.'));
     }
   }
 }
@@ -331,8 +352,14 @@ function _locale_export_po_form_submit($form_id, $form_values) {
 function _locale_string_seek_form() {
   // Get *all* languages set up
   $languages = locale_supported_languages(FALSE, TRUE);
-  asort($languages['name']); unset($languages['name']['en']);
-  $languages['name'] = array_map('check_plain', $languages['name']);
+  unset($languages['name']['en']);
+  // Sanitize the values to be used in radios.
+  $languages_name = array();
+  foreach ($languages['name'] as $key => $value) {
+    $languages_name[check_plain($key)] = check_plain($value);
+  }
+  $languages['name'] = $languages_name;
+  asort($languages['name']);
 
   // Present edit form preserving previous user settings
   $query = _locale_string_seek_query();
@@ -526,6 +553,10 @@ function _locale_import_read_po($op, $file, $mode = NULL, $lang = NULL) {
 
   while (!feof($fd)) {
     $line = fgets($fd, 10*1024); // A line should not be this long
+    if ($lineno == 0) {
+      // The first line might come with a UTF-8 BOM, which should be removed.
+      $line = str_replace("\xEF\xBB\xBF", '', $line);
+    }
     $lineno++;
     $line = trim(strtr($line, array("\\\n" => "")));
 
@@ -534,7 +565,7 @@ function _locale_import_read_po($op, $file, $mode = NULL, $lang = NULL) {
         $current["#"][] = substr($line, 1);
       }
       elseif (($context == "MSGSTR") || ($context == "MSGSTR_ARR")) { // End current entry, start a new one
-        _locale_import_one_string($op, $current, $mode, $lang);
+        _locale_import_one_string($op, $current, $mode, $lang, $file);
         $current = array();
         $current["#"][] = substr($line, 1);
         $context = "COMMENT";
@@ -560,7 +591,7 @@ function _locale_import_read_po($op, $file, $mode = NULL, $lang = NULL) {
     }
     elseif (!strncmp("msgid", $line, 5)) {
       if ($context == "MSGSTR") {   // End current entry, start a new one
-        _locale_import_one_string($op, $current, $mode, $lang);
+        _locale_import_one_string($op, $current, $mode, $lang, $file);
         $current = array();
       }
       elseif ($context == "MSGID") { // Already in this context? Parse error
@@ -634,7 +665,7 @@ function _locale_import_read_po($op, $file, $mode = NULL, $lang = NULL) {
 
   // End of PO file, flush last entry
   if (($context == "MSGSTR") || ($context == "MSGSTR_ARR")) {
-    _locale_import_one_string($op, $current, $mode, $lang);
+    _locale_import_one_string($op, $current, $mode, $lang, $file);
   }
   elseif ($context != "COMMENT") {
     _locale_import_message('The translation file %filename ended unexpectedly at line %line.', $file, $lineno);
@@ -673,8 +704,10 @@ function _locale_import_message($message, $file, $lineno = NULL) {
  *   Should existing translations be replaced ('overwrite' or 'keep')
  * @param $lang
  *   Language to store the string in
+ * @param $file
+ *   Object representation of file being imported, only required when op is 'db-store'
  */
-function _locale_import_one_string($op, $value = NULL, $mode = NULL, $lang = NULL) {
+function _locale_import_one_string($op, $value = NULL, $mode = NULL, $lang = NULL, $file = NULL) {
   static $additions = 0;
   static $updates = 0;
   static $headerdone = FALSE;
@@ -729,7 +762,7 @@ function _locale_import_one_string($op, $value = NULL, $mode = NULL, $lang = NUL
               $plid = 0;
             }
             $loc = db_fetch_object(db_query("SELECT lid FROM {locales_source} WHERE source = '%s'", $english[$key]));
-            if ($loc->lid) { // a string exists
+            if (!empty($loc->lid)) { // a string exists
               $lid = $loc->lid;
               // update location field
               db_query("UPDATE {locales_source} SET location = '%s' WHERE lid = %d", $comments, $lid);
@@ -766,7 +799,7 @@ function _locale_import_one_string($op, $value = NULL, $mode = NULL, $lang = NUL
           $english = $value['msgid'];
           $translation = $value['msgstr'];
           $loc = db_fetch_object(db_query("SELECT lid FROM {locales_source} WHERE source = '%s'", $english));
-          if ($loc->lid) { // a string exists
+          if (!empty($loc->lid)) { // a string exists
             $lid = $loc->lid;
             // update location field
             db_query("UPDATE {locales_source} SET location = '%s' WHERE source = '%s'", $comments, $english);
@@ -806,8 +839,10 @@ function _locale_import_one_string($op, $value = NULL, $mode = NULL, $lang = NUL
 /**
  * Parses a Gettext Portable Object file header
  *
- * @param $header A string containing the complete header
- * @return An associative array of key-value pairs
+ * @param $header
+ *   A string containing the complete header
+ * @return
+ *   An associative array of key-value pairs
  */
 function _locale_import_parse_header($header) {
   $hdr = array();
@@ -873,8 +908,10 @@ function _locale_import_parse_plural_forms($pluralforms, $filename) {
  * While parsing, we ensure, that the operators have the right
  * precedence and associativity.
  *
- * @param $string A string containing the arithmetic formula
- * @return The PHP version of the formula
+ * @param $string
+ *   A string containing the arithmetic formula
+ * @return
+ *   The PHP version of the formula
  */
 function _locale_import_parse_arithmetic($string) {
   // Operator precedence table
@@ -908,7 +945,7 @@ function _locale_import_parse_arithmetic($string) {
         $topop = array_pop($opstk);
       }
     }
-    elseif ($prec[$ctok]) {
+    elseif (!empty($prec[$ctok])) {
       // If it's an operator, then pop from $oparr into $elarr until the
       // precedence in $oparr is less than current, then push into $oparr
       $topop = array_pop($opstk);
@@ -968,8 +1005,10 @@ function _locale_import_parse_arithmetic($string) {
 /**
  * Backward compatible implementation of token_get_all() for formula parsing
  *
- * @param $string A string containing the arithmetic formula
- * @return The PHP version of the formula
+ * @param $string
+ *   A string containing the arithmetic formula
+ * @return
+ *   The PHP version of the formula
  */
 function _locale_import_tokenize_formula($formula) {
   $formula = str_replace(" ", "", $formula);
@@ -1032,8 +1071,10 @@ function _locale_import_tokenize_formula($formula) {
  *
  * This is a callback function used via array_map()
  *
- * @param $entry An array element
- * @param $key Index of the array element
+ * @param $entry
+ *   An array element
+ * @param $key
+ *   Index of the array element
  */
 function _locale_import_append_plural($entry, $key) {
   // No modifications for 0, 1
@@ -1049,8 +1090,10 @@ function _locale_import_append_plural($entry, $key) {
 /**
  * Generate a short, one string version of the passed comment array
  *
- * @param $comment An array of strings containing a comment
- * @return Short one string version of the comment
+ * @param $comment
+ *   An array of strings containing a comment
+ * @return
+ *   Short one string version of the comment
  */
 function _locale_import_shorten_comments($comment) {
   $comm = '';
@@ -1069,8 +1112,10 @@ function _locale_import_shorten_comments($comment) {
 /**
  * Parses a string in quotes
  *
- * @param $string A string specified with enclosing quotes
- * @return The string parsed from inside the quotes
+ * @param $string
+ *   A string specified with enclosing quotes
+ * @return
+ *   The string parsed from inside the quotes
  */
 function _locale_import_parse_quoted($string) {
   if (substr($string, 0, 1) != substr($string, -1, 1)) {
@@ -1544,7 +1589,8 @@ function _locale_get_iso639_list() {
     "ne" => array("Nepali"),
     "ng" => array("Ndonga"),
     "nl" => array("Dutch", "Nederlands"),
-    "no" => array("Norwegian", "Norsk"),
+    "nb" => array("Norwegian Bokmål", "Bokmål"),
+    "nn" => array("Norwegian Nynorsk", "Nynorsk"),
     "nr" => array("South Ndebele"),
     "nv" => array("Navajo"),
     "ny" => array("Chichewa"),

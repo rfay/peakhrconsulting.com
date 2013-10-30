@@ -1,5 +1,5 @@
 <?php
-// $Id: content_types.inc,v 1.24 2007/01/09 07:53:26 drumm Exp $
+// $Id: content_types.inc,v 1.24.2.4 2008/02/11 07:54:44 drumm Exp $
 
 /**
  * @file
@@ -18,7 +18,6 @@ function node_overview_types() {
   foreach ($names as $key => $name) {
     $type = $types[$key];
     if (function_exists($type->module .'_form')) {
-      $name = check_plain($name);
       $type_url_str = str_replace('_', '-', $type->type);
       // Populate the operations field.
       $operations = array();
@@ -194,6 +193,7 @@ function node_type_form($type = NULL) {
   $form['submit'] = array(
     '#type' => 'submit',
     '#value' => t('Save content type'),
+    '#weight' => 40,
   );
 
   if ($type->custom) {
@@ -201,6 +201,7 @@ function node_type_form($type = NULL) {
       $form['delete'] = array(
         '#type' => 'submit',
         '#value' => t('Delete content type'),
+        '#weight' => 45,
       );
     }
   }
@@ -208,6 +209,7 @@ function node_type_form($type = NULL) {
     $form['reset'] = array(
       '#type' => 'submit',
       '#value' => t('Reset to defaults'),
+      '#weight' => 50,
     );
   }
 
@@ -224,9 +226,6 @@ function node_type_form_validate($form_id, $form_values) {
 
   // Work out what the type was before the user submitted this form
   $old_type = trim($form_values['old_type']);
-  if (empty($old_type)) {
-    $old_type = $type->type;
-  }
 
   $types = node_get_types('names');
 
@@ -237,16 +236,18 @@ function node_type_form_validate($form_id, $form_values) {
     if (!preg_match('!^[a-z0-9_]+$!', $type->type)) {
       form_set_error('type', t('The machine-readable name can only consist of lowercase letters, underscores, and numbers.'));
     }
-    // The type cannot be just the character '0', since elsewhere we check it using empty().
-    if ($type->type === '0') {
-      form_set_error('type', t("Invalid type. Please enter a type name other than '0' (the character zero)."));
+    // 'theme' conflicts with theme_node_form()
+    // 'add' and 'list' conflict with menu paths
+    // '0' is invalid, since elsewhere we check it using empty().
+    if (in_array($type->type, array('0', 'theme', 'add', 'list'))) {
+      form_set_error('type', t("Invalid machine-readable name. Please enter a name other than %invalid.", array('%invalid' => $type->type)));
     }
   }
 
   $names = array_flip($types);
 
   if (isset($names[$type->name]) && $names[$type->name] != $old_type) {
-    form_set_error('name', t('The human-readable name %name is already taken.', array('%name' => $names[$type->name])));
+    form_set_error('name', t('The human-readable name %name is already taken.', array('%name' => $type->name)));
   }
 }
 

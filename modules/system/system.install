@@ -1,10 +1,9 @@
 <?php
-// $Id: system.install,v 1.69 2007/01/10 23:22:34 unconed Exp $
+// $Id: system.install,v 1.69.2.12 2009/03/22 19:55:22 drumm Exp $
 
-define('DRUPAL_MINIMUM_PHP',    '4.3.3');
+define('DRUPAL_MINIMUM_PHP',    '4.3.5');
 define('DRUPAL_MINIMUM_MYSQL',  '3.23.17'); // If using MySQL
-define('DRUPAL_MINIMUM_PGSQL',  '7.3');  // If using PostgreSQL
-define('DRUPAL_MINIMUM_APACHE', '1.3');  // If using Apache
+define('DRUPAL_MINIMUM_PGSQL',  '7.4');  // If using PostgreSQL
 
 /**
  * Test and report Drupal installation requirements.
@@ -24,34 +23,12 @@ function system_requirements($phase) {
     );
   }
 
-  // Test web server
+  // Web server information.
   $software = $_SERVER['SERVER_SOFTWARE'];
   $requirements['webserver'] = array(
     'title' => $t('Web server'),
     'value' => $software,
   );
-  // Use server info string, if present.
-  if ($software && preg_match('![0-9]!', $software)) {
-    list($server, $version) = split('[ /]', $software);
-    switch ($server) {
-      case 'Apache':
-        if (version_compare($version, DRUPAL_MINIMUM_APACHE) < 0) {
-          $requirements['webserver']['description'] = $t('Your Apache server is too old. Drupal requires at least Apache %version.', array('%version' => DRUPAL_MINIMUM_APACHE));
-          $requirements['webserver']['severity'] = REQUIREMENT_ERROR;
-        }
-        break;
-
-      default:
-        $requirements['webserver']['description'] = $t('The web server you\'re using has not been tested with Drupal and might not work properly.');
-        $requirements['webserver']['severity'] = REQUIREMENT_WARNING;
-        break;
-    }
-  }
-  else {
-    $requirements['webserver']['value'] = $software ? $software : $t('Unknown');
-    $requirements['webserver']['description'] = $t('Unable to determine your web server type and version. Drupal might not work properly.');
-    $requirements['webserver']['severity'] = REQUIREMENT_WARNING;
-  }
 
   // Test PHP version
   $requirements['php'] = array(
@@ -61,6 +38,25 @@ function system_requirements($phase) {
   if (version_compare(phpversion(), DRUPAL_MINIMUM_PHP) < 0) {
     $requirements['php']['description'] = $t('Your PHP installation is too old. Drupal requires at least PHP %version.', array('%version' => DRUPAL_MINIMUM_PHP));
     $requirements['php']['severity'] = REQUIREMENT_ERROR;
+  }
+
+  // Test PHP register_globals setting.
+  $requirements['php_register_globals'] = array(
+    'title' => $t('PHP register globals'),
+  );
+  $register_globals = trim(ini_get('register_globals'));
+  // Unfortunately, ini_get() may return many different values, and we can't
+  // be certain which values mean 'on', so we instead check for 'not off'
+  // since we never want to tell the user that their site is secure
+  // (register_globals off), when it is in fact on. We can only guarantee
+  // register_globals is off if the value returned is 'off', '', or 0.
+  if (!empty($register_globals) && strtolower($register_globals) != 'off') {
+    $requirements['php_register_globals']['description'] = $t('<em>register_globals</em> is enabled. Drupal requires this configuration directive to be disabled. Your site may not be secure when <em>register_globals</em> is enabled. The PHP manual has instructions for <a href="http://php.net/configuration.changes">how to change configuration settings</a>.');
+    $requirements['php_register_globals']['severity'] = REQUIREMENT_ERROR;
+    $requirements['php_register_globals']['value'] = $t("Enabled ('@value')", array('@value' => $register_globals));
+  }
+  else {
+    $requirements['php_register_globals']['value'] = $t('Disabled');
   }
 
   // Test DB version
@@ -551,6 +547,7 @@ function system_install() {
         data longtext,
         PRIMARY KEY (uid),
         UNIQUE KEY name (name),
+        KEY created (created),
         KEY access (access)
       ) /*!40100 DEFAULT CHARACTER SET UTF8 */ ");
 
@@ -674,7 +671,6 @@ function system_install() {
 
       db_query("CREATE TABLE {boxes} (
         bid serial,
-        title varchar(64) NOT NULL default '',
         body text,
         info varchar(128) NOT NULL default '',
         format smallint NOT NULL default '0',
@@ -905,6 +901,8 @@ function system_install() {
         UNIQUE (name)
       )");
 
+      db_query("SELECT setval('{role}_rid_seq',". max(DRUPAL_ANONYMOUS_RID,DRUPAL_AUTHENTICATED_RID) .")");
+
       db_query("CREATE TABLE {blocks_roles} (
         module varchar(64) NOT NULL,
         delta varchar(32) NOT NULL,
@@ -1019,6 +1017,7 @@ function system_install() {
         UNIQUE (name)
       )");
       db_query("CREATE INDEX {users}_access_idx ON {users} (access)");
+      db_query("CREATE INDEX {users}_created_idx ON {users} (created)");
 
       db_query("CREATE TABLE {users_roles} (
         uid int_unsigned NOT NULL default '0',
@@ -1075,8 +1074,8 @@ function system_install() {
 
   db_query("INSERT INTO {users} (uid,name,mail) VALUES(0,'','')");
 
-  db_query("INSERT INTO {role} (name) VALUES ('anonymous user')");
-  db_query("INSERT INTO {role} (name) VALUES ('authenticated user')");
+  db_query("INSERT INTO {role} (rid, name) VALUES (". DRUPAL_ANONYMOUS_RID .", 'anonymous user')");
+  db_query("INSERT INTO {role} (rid, name) VALUES (". DRUPAL_AUTHENTICATED_RID .", 'authenticated user')");
 
   db_query("INSERT INTO {permission} VALUES (1,'access content',0)");
   db_query("INSERT INTO {permission} VALUES (2,'access comments, access content, post comments, post comments without approval',0)");
@@ -1258,7 +1257,7 @@ function system_update_113() {
   }
 
   // Flush the menu cache:
-  cache_clear_all('menu:', TRUE);
+  cache_clear_all('*', 'cache_menu', TRUE);
 
   return $ret;
 }
@@ -1405,7 +1404,7 @@ function system_update_120() {
     list(, $page, $op, $uid) = explode('/', $alias->src);
     if ($page == 'feed') {
       $new = "blog/$uid/feed";
-      update_sql("UPDATE {url_alias} SET src = '%s' WHERE pid = '%s'", $new, $alias->pid);
+      db_query("UPDATE {url_alias} SET src = '%s' WHERE pid = %d", $new, $alias->pid);
     }
   }
 
@@ -3049,7 +3048,7 @@ function system_update_181() {
   switch ($GLOBALS['db_type']) {
     case 'mysql':
     case 'mysqli':
-      $ret[] = update_sql("ALTER TABLE {profile_fields} ADD autocomplete TINYint NOT NULL AFTER visibility ;");
+      $ret[] = update_sql("ALTER TABLE {profile_fields} ADD autocomplete TINYint NOT NULL AFTER visibility");
       break;
     case 'pgsql':
       db_add_column($ret, 'profile_fields', 'autocomplete', 'smallint', array('not null' => TRUE, 'default' => 0));
@@ -3508,6 +3507,35 @@ function system_update_1021() {
  * @} End of "defgroup updates-4.7-to-5.0"
  */
 
+
+/**
+ * @defgroup updates-5.x-extra Extra system updates for 5.x
+ * @{
+ */
+
+/**
+ * Add index on users created column.
+ */
+function system_update_1022() {
+  $ret = array();
+  switch ($GLOBALS['db_type']) {
+    case 'mysql':
+    case 'mysqli':
+      $ret[] = update_sql('ALTER TABLE {users} ADD KEY created (created)');
+      break;
+
+    case 'pgsql':
+      $ret[] = update_sql("CREATE INDEX {users}_created_idx ON {users} (created)");
+      break;
+  }
+  // Also appears as system_update_2004(). Ensure we don't update twice.
+  variable_set('system_update_1022', TRUE);
+  return $ret;
+}
+
+/**
+ * @} End of "defgroup updates-5.x-extra"
+ */
 
 /**
  * @defgroup updates-5.0-to-x.x System updates from 5.0 to x.x

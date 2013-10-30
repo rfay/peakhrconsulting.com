@@ -1,5 +1,5 @@
 <?php
-// $Id: database.mysql.inc,v 1.66 2006/12/27 22:50:09 dries Exp $
+// $Id: database.mysql.inc,v 1.66.2.4 2009/07/10 06:09:38 drumm Exp $
 
 /**
  * @file
@@ -53,16 +53,22 @@ function db_version() {
  * (e.g. your database and web server live on different machines).
  */
 function db_connect($url) {
+  $url = parse_url($url);
+
   // Check if MySQL support is present in PHP
   if (!function_exists('mysql_connect')) {
+    // Redirect to installer if using default DB credentials
+    if ($url['user'] == 'username' && $url['pass'] == 'password') {
+      include_once 'includes/install.inc';
+      install_goto('install.php');
+    }
     drupal_maintenance_theme();
+    drupal_set_header('HTTP/1.1 503 Service Unavailable');
     drupal_set_title('PHP MySQL support not enabled');
     print theme('maintenance_page', '<p>We were unable to use the MySQL database because the MySQL extension for PHP is not installed. Check your <code>PHP.ini</code> to see how you can enable it.</p>
 <p>For more help, see the <a href="http://drupal.org/node/258">Installation and upgrading handbook</a>. If you are unsure what these terms mean you should probably contact your hosting provider.</p>');
     exit;
   }
-
-  $url = parse_url($url);
 
   // Decode url-encoded information in the db connection string
   $url['user'] = urldecode($url['user']);
@@ -100,7 +106,7 @@ function db_connect($url) {
     drupal_set_header('HTTP/1.1 503 Service Unavailable');
     drupal_set_title('Unable to connect to database server');
     print theme('maintenance_page', '<p>If you still have to install Drupal, proceed to the <a href="'. base_path() .'install.php">installation page</a>.</p>
-<p>If you have already finished installed Drupal, this either means that the username and password information in your <code>settings.php</code> file is incorrect or that we can\'t connect to the MySQL database server. This could mean your hosting provider\'s database server is down.</p>
+<p>If you have already finished installing Drupal, this either means that the username and password information in your <code>settings.php</code> file is incorrect or that we can\'t connect to the MySQL database server. This could mean your hosting provider\'s database server is down.</p>
 <p>The MySQL error was: '. theme('placeholder', mysql_error()) .'.</p>
 <p>Currently, the username is '. theme('placeholder', $url['user']) .' and the database server is '. theme('placeholder', $url['host']) .'.</p>
 <ul>
@@ -114,6 +120,7 @@ function db_connect($url) {
 
   if (!mysql_select_db(substr($url['path'], 1))) {
     drupal_maintenance_theme();
+    drupal_set_header('HTTP/1.1 503 Service Unavailable');
     drupal_set_title('Unable to select database');
     print theme('maintenance_page', '<p>We were able to connect to the MySQL database server (which means your username and password are okay) but not able to select the database.</p>
 <p>The MySQL error was: '. theme('placeholder', mysql_error($connection)) .'.</p>
@@ -353,7 +360,7 @@ function db_query_temporary($query) {
   $tablename = array_pop($args);
   array_shift($args);
 
-  $query = preg_replace('/^SELECT/i', 'CREATE TEMPORARY TABLE '. $tablename .' SELECT', db_prefix_tables($query));
+  $query = preg_replace('/^SELECT/i', 'CREATE TEMPORARY TABLE '. $tablename .' Engine=HEAP SELECT', db_prefix_tables($query));
   if (isset($args[0]) and is_array($args[0])) { // 'All arguments in one array' syntax
     $args = $args[0];
   }

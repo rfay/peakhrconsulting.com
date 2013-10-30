@@ -4,7 +4,8 @@ description = Alerts other sites when your site has been updated.
 package = Core - optional
 version = VERSION
 
-; Information added by drupal.org packaging script on 2007-01-15
-version = "5.0"
+; Information added by drupal.org packaging script on 2010-08-11
+version = "5.23"
 project = "drupal"
+datestamp = "1281559590"
 
