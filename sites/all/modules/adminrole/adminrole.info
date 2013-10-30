@@ -1,9 +1,0 @@
-name = Admin Role
-description = Automatically assign all permissions to an admin role.
-package = Administration
-
-; Information added by drupal.org packaging script on 2009-11-25
-version = "5.x-1.7"
-project = "adminrole"
-datestamp = "1259183103"
-
