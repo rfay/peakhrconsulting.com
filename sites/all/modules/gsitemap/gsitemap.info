@@ -1,0 +1,8 @@
+; $Id: gsitemap.info,v 1.3.2.2 2007/01/12 05:52:48 samamac Exp $
+name = Google Sitemap
+description = Creates a Google Sitemap.
+
+; Information added by drupal.org packaging script on 2007-02-02
+version = "5.x-1.0"
+project = "gsitemap"
+
