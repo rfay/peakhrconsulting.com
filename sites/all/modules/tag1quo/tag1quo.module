@@ -14,7 +14,7 @@ define('TAG1_API_VERSION', '2.0');
 /**
  * URL to check for updates.
  */
-define('TAG1QUO_URL', 'https://quo.tag1consulting.com/' . TAG1_API_VERSION . '/entity/d7lts_site');
+define('TAG1QUO_URL', 'https://quo.tag1consulting.com/' . TAG1_API_VERSION . '/entity/d6lts_site');
 
 /**
  * Send heartbeat roughly once every day. (1 day minus ten minutes)
