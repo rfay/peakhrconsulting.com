@@ -3,9 +3,12 @@ name: peakhrconsulting.com
 type: drupal7
 docroot: ""
 php_version: "7.1"
-router_http_port: "80"
-router_https_port: "443"
 provider: default
+hooks:
+  post-start:
+    - exec-host: mkdir -p files/private
+    - exec: drush vset file_private_path files/private
+    - exec: "drush uli"
 
 # Key features of ddev's config.yaml:
 
