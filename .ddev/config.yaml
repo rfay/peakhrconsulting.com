@@ -3,12 +3,16 @@ name: peakhrconsulting.com
 type: drupal7
 docroot: ""
 php_version: "7.1"
+router_http_port: "80"
+router_https_port: "443"
+additional_hostnames: []
+additional_environment_variables: {}
 provider: default
 hooks:
   post-start:
-    - exec-host: mkdir -p files/private
-    - exec: drush vset file_private_path files/private
-    - exec: "drush uli"
+  - exec-host: mkdir -p files/private
+  - exec: drush vset file_private_path files/private
+  - exec: drush uli
 
 # Key features of ddev's config.yaml:
 
@@ -31,12 +35,11 @@ hooks:
 # router_http_port: <port>  # Port to be used for http (defaults to port 80)
 # router_https_port: <port> # Port for https (defaults to 443)
 
-# additional_hostnames[]  # For example, additional_hostnames["somename.ddev.local", "somethingelse.some.other.domain"]
-#   would provide http and https URLs for "somename.ddev.local" and "somethingelse.some.other.domain"
-#   This can also be written in yaml array syntax:
-#   additional_hostnames:
-#   - somename.ddev.local
-#   - somethingelse.some.other.domain
+#additional_hostnames:
+# - somename
+# - someothername
+# would provide http and https URLs for "somename.ddev.local"
+# and "someothername.ddev.local".
 
 # provider: default # Currently either "default" or "pantheon"
 #
