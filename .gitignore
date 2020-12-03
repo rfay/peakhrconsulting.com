@@ -6,3 +6,4 @@ docroot/sites/*/settings*.php
 /docroot/sites/*/private
 
 /private_files
+/.tarballs
